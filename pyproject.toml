@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 hermes-104-hunter = "hermes_104_hunter.server:main"
+hermes-104-hunter-login = "hermes_104_hunter.login:main"
 
 [build-system]
 requires = ["hatchling"]

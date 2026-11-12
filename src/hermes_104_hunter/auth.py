@@ -115,12 +115,21 @@ def get_active_cookies() -> dict[str, str]:
     if source == "file":
         return load_cookies_from_file(settings.cookie_file)
     if source == "chrome":
+        # 1. Try saved file from interactive login or settings
+        default_file = Path("~/.hermes/104_cookies.json").expanduser()
+        if default_file.is_file():
+            file_cookies = load_cookies_from_file(str(default_file))
+            if file_cookies:
+                return file_cookies
+
+        if settings.cookie_file:
+            file_cookies = load_cookies_from_file(settings.cookie_file)
+            if file_cookies:
+                return file_cookies
+
+        # 2. Try Chrome browser cookies
         cookies = load_cookies_from_browser("chrome")
-        if not cookies:
-            # Fallback to env or file if available
-            if settings.cookie_string:
-                cookies = load_cookies_from_env()
-            elif settings.cookie_file:
-                cookies = load_cookies_from_file(settings.cookie_file)
+        if not cookies and settings.cookie_string:
+            cookies = load_cookies_from_env()
         return cookies
     return {}
