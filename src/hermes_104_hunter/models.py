@@ -72,12 +72,15 @@ class ApplyAnalysisResult(BaseModel):
     job_id: str
     job_no: int
     total_applicants: int | None = Field(
-        description="數學逆推算出的精準總應徵人數；僅在 total_basis='inferred' 時才可視為精算值"
+        default=None,
+        description="數學逆推算出的唯一精確總應徵人數；僅在 total_basis='inferred' 且解唯一、資料充分時提供，其他情況為 None",
     )
-    total_basis: Literal["inferred", "exact", "unknown"] = Field(description="計算依據：inferred 代表演算法逆推成功")
+    total_basis: Literal["inferred", "exact", "unknown", "ambiguous"] = Field(
+        description="計算依據：inferred 代表唯一精確解，ambiguous 代表多解或資料不足，unknown 代表無精確解"
+    )
     estimated_applicants: int | None = Field(
         default=None,
-        description="無精確整數解時的『最小誤差概估』，僅供參考，絕不可當作精算人數引用",
+        description="無唯一精確解時的概估人數（僅供參考，絕不可當作精確人數引用）",
     )
     estimate_note: str = Field(default="", description="概估說明與信心限制，回答時應一併轉述")
     candidate_counts: list[int] = Field(default_factory=list, description="符合百分比公倍數的可能人數解（依吻合度排序）")

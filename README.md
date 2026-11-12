@@ -135,6 +135,19 @@ mcp_servers:
 
 ---
 
+## ▍隱私與安全邊界 (Security & Privacy Boundaries)
+
+1. **個資防護**：
+   - `.gitignore` 預設嚴格排除 `MY_PROFILE.md`、`*.profile.md`、`.env*` 與 `*cookie*.json`。請安心將個人完整履歷與薪資底線寫入 `MY_PROFILE.md`，絕對不會意外提交至公開 Git 倉庫。
+2. **憑證本機限定**：
+   - Chrome Cookie 讀取與本機 Session 快取僅限於本地端執行，絕不向外部第三方傳輸或洩漏憑證。
+3. **Hit-in-the-Loop 代填安全防護**：
+   - 應徵代填功能（`job104_prepare_application`）僅代為填入自薦信與截圖，**絕對不自動點擊送出**，保留使用者肉眼審核與最終決策權。
+4. **演算法誠實性**：
+   - 競爭人數逆推僅在「候選解唯一且資料充分」時才標註為精算值 (`inferred`)；若存在多組解或資料過於粗略，誠實標註為保留區間不確定性 (`ambiguous`)，絕不以推估值充當精確值。
+
+---
+
 ## ▍授權條款 (License)
 
 本專案依據 [MIT 授權條款](LICENSE) 開源。

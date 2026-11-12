@@ -46,7 +46,8 @@ description: Use when searching 104 jobs, calculating competitor counts via math
 * 參數：
   - `job_url_or_id` (str, 必填): 職缺網址或代碼。
 * 回傳重點：
-  - `total_applicants`: 數學逆推精算出的確切應徵人數。
+  - `total_applicants`: 數學逆推精算出的確切應徵人數（若解唯一且充分；多解時為 None 並提供候選列表與概估說明）。
+  - `total_basis`: 計算依據 (`inferred` 唯一精確解 / `ambiguous` 多解或資料不足 / `unknown` 無解)。
   - `education` / `age_distribution` / `experience_distribution`: 對手背景結構。
   - `top_skills`: 對手具備技能 Top 10（可用於自薦信突圍比對）。
 

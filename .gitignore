@@ -33,6 +33,17 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# User Profile & Sensitive Personal Data
+MY_PROFILE.md
+*.profile.md
+.env
+.env.*
+*.env
+*.cookie
+*.cookies
+*cookie*.json
+*cookies*.json
+
 # Screenshots & artifacts
 .screenshots/
 *.png

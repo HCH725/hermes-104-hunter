@@ -175,3 +175,41 @@ def test_best_effort_estimate_never_leaves_range():
     assert err >= 0.0
     empty_n, _ = _best_effort_estimate([], (1, 5000))
     assert empty_n is None
+
+
+def test_ambiguous_solution_does_not_fabricate_single_count():
+    """When multiple candidates satisfy coarse percentages (e.g. 50/50 in 11~30),
+    the result must report total_applicants=None with total_basis='ambiguous'
+    and list all candidates rather than arbitrarily picking the first one."""
+    raw_payload = {
+        "edu": {
+            "0": {"eduName": "博碩士", "percent": "50.00"},
+            "1": {"eduName": "大學", "percent": "50.00"},
+            "update_time": "2026-11-12 10:00:00",
+        },
+    }
+    result = normalize_apply_analysis(raw_payload, "test1", 11111, range_code=3)  # 11~30
+    assert result.total_applicants is None
+    assert result.total_basis == "ambiguous"
+    assert len(result.candidate_counts) > 1
+    assert 12 in result.candidate_counts
+    assert 14 in result.candidate_counts
+    assert "多個符合百分比的人數解" in result.estimate_note
+    # Counts per item must remain None to avoid misleading callers
+    assert all(item.count is None for item in result.education)
+
+
+def test_insufficient_data_does_not_declare_inferred():
+    """A single trivial 100% or sparse data cannot claim exact inferred count
+    even if only one integer falls within a narrow range."""
+    raw_payload = {
+        "edu": {
+            "0": {"eduName": "大學", "percent": "100.00"},
+            "update_time": "2026-11-12 10:00:00",
+        },
+    }
+    result = normalize_apply_analysis(raw_payload, "test2", 22222, range_code=1)  # 0~5
+    assert result.total_applicants is None
+    assert result.total_basis == "ambiguous"
+    assert all(item.count is None for item in result.education)
+

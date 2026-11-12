@@ -64,6 +64,7 @@ def infer_applicant_count(
     percents: list[float],
     bounds: tuple[int, int] = (1, 5000),
     dimension_groups: list[list[float]] | None = None,
+    max_candidates: int = 20,
 ) -> list[int]:
     """
     Infer exact competitor applicant count n via mathematical constraint solving.
@@ -100,7 +101,7 @@ def infer_applicant_count(
 
         if groups_valid:
             candidates.append(n)
-            if len(candidates) >= 5:
+            if len(candidates) >= max_candidates:
                 break
 
     return candidates
@@ -226,15 +227,46 @@ def normalize_apply_analysis(
 
     total_applicants: int | None = None
     total_basis: Any = "unknown"
-    if candidates:
-        total_applicants = candidates[0]
-        total_basis = "inferred"
-
-    # When no exact integer solution exists, do NOT invent a number.
-    # Report the official range only, plus a clearly-labelled heuristic estimate.
     estimated_applicants: int | None = None
     estimate_note = ""
-    if total_applicants is None:
+
+    # 資料充分性檢查：
+    # 至少要有 2 個以上非 0 且非 100 的相異百分比，或至少包含帶有小數點後精確位數的百分比，
+    # 才能排除因粗粒度或巧合造成的單一假性解。
+    informative_percents = [p for p in all_percents if 0.0 < p < 100.0]
+    distinct_informative = set(informative_percents)
+    has_fractional = any(abs(p - round(p)) > 0.01 for p in informative_percents)
+    is_data_sufficient = len(distinct_informative) >= 2 or (len(distinct_informative) == 1 and has_fractional)
+
+    if len(candidates) == 1 and is_data_sufficient:
+        total_applicants = candidates[0]
+        total_basis = "inferred"
+        estimate_note = ""
+    elif len(candidates) > 1:
+        # 存在多個可能候選解：保留人數區間與不確定性，切勿任意取第一項作為精確值
+        total_applicants = None
+        total_basis = "ambiguous"
+        candidate_summary = ", ".join(str(c) for c in candidates[:5])
+        if len(candidates) > 5:
+            candidate_summary += f"... (共 {len(candidates)} 個可能解)"
+        estimated_applicants, best_err = _best_effort_estimate(
+            all_percents, bounds=(range_info["min"], range_info["max"])
+        )
+        estimate_note = (
+            f"存在多個符合百分比的人數解 ({candidate_summary})，無法唯一收斂，保留區間不確定性。"
+            f"官方區間：{range_info['label']}。"
+        )
+    elif len(candidates) == 1 and not is_data_sufficient:
+        total_applicants = None
+        total_basis = "ambiguous"
+        estimated_applicants = candidates[0]
+        estimate_note = (
+            f"候選解僅有 {candidates[0]}，但有效百分比資料不足以排除巧合，"
+            f"保留區間不確定性。官方區間：{range_info['label']}。"
+        )
+    else:
+        total_applicants = None
+        total_basis = "unknown"
         estimated_applicants, best_err = _best_effort_estimate(
             all_percents, bounds=(range_info["min"], range_info["max"])
         )
