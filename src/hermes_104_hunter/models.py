@@ -71,8 +71,15 @@ class LanguageItem(BaseModel):
 class ApplyAnalysisResult(BaseModel):
     job_id: str
     job_no: int
-    total_applicants: int | None = Field(description="數學逆推算出的精準總應徵人數（若無法精算則為區間預估）")
+    total_applicants: int | None = Field(
+        description="數學逆推算出的精準總應徵人數；僅在 total_basis='inferred' 時才可視為精算值"
+    )
     total_basis: Literal["inferred", "exact", "unknown"] = Field(description="計算依據：inferred 代表演算法逆推成功")
+    estimated_applicants: int | None = Field(
+        default=None,
+        description="無精確整數解時的『最小誤差概估』，僅供參考，絕不可當作精算人數引用",
+    )
+    estimate_note: str = Field(default="", description="概估說明與信心限制，回答時應一併轉述")
     candidate_counts: list[int] = Field(default_factory=list, description="符合百分比公倍數的可能人數解（依吻合度排序）")
     apply_range: str = Field(description="104 官方標籤區間（如 11~30 人、30 人以上）")
     update_time: str

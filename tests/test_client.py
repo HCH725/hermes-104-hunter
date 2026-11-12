@@ -102,3 +102,29 @@ async def test_client_get_job_detail():
     assert "PyTorch" in detail.skills_req
 
     await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_search_respects_page_size():
+    """104's API can return more rows than requested; client must trim."""
+    client = Job104Client()
+    rows = [
+        {
+            "jobNo": f"1234567{i}",
+            "jobName": f"Job {i}",
+            "custName": f"Co {i}",
+            "salaryDesc": "月薪 50,000 元",
+            "salaryLow": "50000",
+            "link": {"job": f"https://www.104.com.tw/job/7ab{i}a"},
+        }
+        for i in range(5)
+    ]
+    respx.get(SEARCH_API_URL).mock(
+        return_value=httpx.Response(
+            200, json={"data": rows, "metadata": {"pagination": {"total": 5, "lastPage": 1}}}
+        )
+    )
+    res = await client.search_jobs("Python", page_size=2)
+    assert len(res.jobs) == 2
+    await client.close()

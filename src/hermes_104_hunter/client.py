@@ -153,6 +153,11 @@ class Job104Client:
 
         jobs = [normalize_search_job(item) for item in raw_data]
 
+        # 104's search API does not reliably honour `pagesize`; enforce it ourselves
+        # so callers get exactly the batch size they asked for.
+        if page_size and len(jobs) > page_size:
+            jobs = jobs[:page_size]
+
         # Apply filters
         if exclude_negotiable:
             jobs = [j for j in jobs if not j.is_negotiable]

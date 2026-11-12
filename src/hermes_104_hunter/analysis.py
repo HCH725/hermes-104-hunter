@@ -82,7 +82,10 @@ def infer_applicant_count(
             continue
 
         # Mutual exclusion group verification: if group sum is close to 100%,
-        # the sum of rounded integer counts must strictly equal n.
+        # the sum of rounded integer counts should equal n.
+        # ponytail: tolerance of 1 count absorbs 104's 2-decimal rounding drift across
+        # categories (an observed group can sum to 100.01%). Tighten to 0 if false
+        # positives ever appear; widen only with evidence.
         groups_valid = True
         if dimension_groups:
             for group in dimension_groups:
@@ -91,7 +94,7 @@ def infer_applicant_count(
                 group_sum = sum(group)
                 if abs(group_sum - 100.0) <= 5.0:
                     count_sum = sum(round((p * n) / 100.0) for p in group)
-                    if count_sum != n:
+                    if abs(count_sum - n) > 1:
                         groups_valid = False
                         break
 
@@ -101,6 +104,35 @@ def infer_applicant_count(
                 break
 
     return candidates
+
+
+def _best_effort_estimate(
+    percents: list[float], bounds: tuple[int, int]
+) -> tuple[int | None, float]:
+    """Return (best n, mean absolute percent error) when no exact solution exists.
+
+    This is a heuristic, never a substitute for a real inferred count.
+    """
+    informative = [p for p in percents if p > 0]
+    if not informative:
+        return None, 0.0
+
+    lo = max(1, bounds[0])
+    hi = min(5000, bounds[1])
+    best_n: int | None = None
+    best_err = float("inf")
+
+    for n in range(lo, hi + 1):
+        err = sum(
+            abs(round(round((p * n) / 100.0) * 10000.0 / n, 2) - p) for p in informative
+        ) / len(informative)
+        if err < best_err:
+            best_err = err
+            best_n = n
+            if err == 0.0:
+                break
+
+    return best_n, best_err
 
 
 def _extract_items(group: Any, name_key: str) -> list[dict[str, Any]]:
@@ -197,10 +229,22 @@ def normalize_apply_analysis(
     if candidates:
         total_applicants = candidates[0]
         total_basis = "inferred"
-    elif range_info["min"] > 0:
-        # Fallback to midpoint if no candidate matched exactly
-        total_applicants = range_info["min"]
-        total_basis = "unknown"
+
+    # When no exact integer solution exists, do NOT invent a number.
+    # Report the official range only, plus a clearly-labelled heuristic estimate.
+    estimated_applicants: int | None = None
+    estimate_note = ""
+    if total_applicants is None:
+        estimated_applicants, best_err = _best_effort_estimate(
+            all_percents, bounds=(range_info["min"], range_info["max"])
+        )
+        if estimated_applicants is not None:
+            estimate_note = (
+                f"無精確整數解；此為最小誤差概估（平均偏差 {best_err:.2f} 個百分點），"
+                f"僅供參考，不可視為精算值。官方區間：{range_info['label']}。"
+            )
+        else:
+            estimate_note = f"資料不足以反推人數。官方區間：{range_info['label']}。"
 
     def _map_dimension(items: list[dict[str, Any]]) -> list[DimensionItem]:
         res: list[DimensionItem] = []
@@ -224,6 +268,8 @@ def normalize_apply_analysis(
         job_no=job_no,
         total_applicants=total_applicants,
         total_basis=total_basis,
+        estimated_applicants=estimated_applicants,
+        estimate_note=estimate_note,
         candidate_counts=candidates,
         apply_range=range_info["label"],
         update_time=str(update_time),
