@@ -1,0 +1,237 @@
+"""Mathematical reverse-engineering and normalization for 104 competitor apply analysis."""
+
+from __future__ import annotations
+
+import math
+import re
+from typing import Any
+
+from .models import ApplyAnalysisResult, DimensionItem, LanguageItem
+
+
+def extract_job_id(job_url_or_id: str) -> str:
+    """Extract clean job slug from 104 URL or raw slug string."""
+    s = str(job_url_or_id).strip()
+    # Match /job/([a-zA-Z0-9]+) or /analysis/([a-zA-Z0-9]+)
+    m = re.search(r"/(?:job|analysis)/([a-zA-Z0-9]+)", s)
+    if m:
+        return m.group(1).lower()
+    # Strip any leading URL scheme/path and queries
+    s = s.split("?")[0].split("#")[0].rstrip("/")
+    cleaned = s.split("/")[-1].lower()
+    if re.match(r"^[a-z0-9]+$", cleaned):
+        return cleaned
+    raise ValueError(f"無法解析 104 職缺代碼: {job_url_or_id}")
+
+
+def slug_to_job_no(slug: str) -> int:
+    """Convert base-36 slug (e.g. '8nd15') to decimal job_no (e.g. 14526905)."""
+    cleaned = extract_job_id(slug)
+    if re.match(r"^\d{7,10}$", cleaned):
+        return int(cleaned, 10)
+    try:
+        return int(cleaned, 36)
+    except ValueError as e:
+        raise ValueError(f"職缺代碼 '{slug}' 無法轉換為 104 內部編號: {e}")
+
+
+def parse_apply_range(analysis_type: int | None) -> dict[str, Any]:
+    """Parse 104 analysisType code to text label and search bounds."""
+    if analysis_type == 1:
+        return {"label": "0~5 人", "min": 0, "max": 5}
+    elif analysis_type == 2:
+        return {"label": "6~10 人", "min": 6, "max": 10}
+    elif analysis_type == 3:
+        return {"label": "11~30 人", "min": 11, "max": 30}
+    elif analysis_type == 4:
+        return {"label": "30 人以上", "min": 31, "max": 5000}
+    else:
+        label = f"未知區間(代碼: {analysis_type})" if analysis_type else "未知區間"
+        return {"label": label, "min": 1, "max": 5000}
+
+
+def fits_percent(percent: float, n: int) -> bool:
+    """Check whether integer applicant count n can produce rounded percentage."""
+    if n <= 0 or percent <= 0:
+        return False
+    k = round((percent * n) / 100.0)
+    if k < 1 or k > n:
+        return False
+    return abs((k * 10000.0) / n - percent * 100.0) <= 0.5 + 1e-9
+
+
+def infer_applicant_count(
+    percents: list[float],
+    bounds: tuple[int, int] = (1, 5000),
+    dimension_groups: list[list[float]] | None = None,
+) -> list[int]:
+    """
+    Infer exact competitor applicant count n via mathematical constraint solving.
+    Evaluates compatibility against all non-zero percentages and mutual-exclusion group sums.
+    """
+    informative = [p for p in percents if p > 0]
+    if not informative:
+        return []
+
+    lo = max(1, bounds[0])
+    hi = min(5000, bounds[1])
+    candidates: list[int] = []
+
+    for n in range(lo, hi + 1):
+        if not all(fits_percent(p, n) for p in informative):
+            continue
+
+        # Mutual exclusion group verification: if group sum is close to 100%,
+        # the sum of rounded integer counts must strictly equal n.
+        groups_valid = True
+        if dimension_groups:
+            for group in dimension_groups:
+                if not group:
+                    continue
+                group_sum = sum(group)
+                if abs(group_sum - 100.0) <= 5.0:
+                    count_sum = sum(round((p * n) / 100.0) for p in group)
+                    if count_sum != n:
+                        groups_valid = False
+                        break
+
+        if groups_valid:
+            candidates.append(n)
+            if len(candidates) >= 5:
+                break
+
+    return candidates
+
+
+def _extract_items(group: Any, name_key: str) -> list[dict[str, Any]]:
+    if not isinstance(group, dict):
+        return []
+    items: list[dict[str, Any]] = []
+    for k, entry in group.items():
+        if k in ("update_time", "total"):
+            continue
+        if isinstance(entry, dict) and entry.get(name_key):
+            try:
+                pct = float(entry.get("percent", 0) or 0)
+                if pct > 0:
+                    items.append({"name": str(entry[name_key]).strip(), "percent": pct})
+            except (ValueError, TypeError):
+                continue
+    items.sort(key=lambda x: x["percent"], reverse=True)
+    return items
+
+
+def normalize_apply_analysis(
+    raw: dict[str, Any],
+    job_id: str,
+    job_no: int,
+    range_code: int | None = None,
+) -> ApplyAnalysisResult:
+    """Transform raw 104 apply analysis payload into structured competitor intelligence."""
+    range_info = parse_apply_range(range_code)
+    update_time = (
+        (raw.get("edu") or {}).get("update_time")
+        or raw.get("update_time")
+        or "未知"
+    )
+
+    edu_items = _extract_items(raw.get("edu"), "eduName")
+    age_items = _extract_items(raw.get("yearRange"), "yearRangeName")
+    exp_items = _extract_items(raw.get("exp"), "expName")
+    major_items = _extract_items(raw.get("major"), "majorName")
+    skill_items = _extract_items(raw.get("skill"), "skillName")
+    cert_items = _extract_items(raw.get("cert") or raw.get("certificate"), "certName")
+
+    # Parse languages
+    languages: list[LanguageItem] = []
+    lang_group = raw.get("language")
+    if isinstance(lang_group, dict):
+        for k, lang in lang_group.items():
+            if k in ("update_time", "total", "none") or not isinstance(lang, dict):
+                continue
+            lang_name = lang.get("langName")
+            if not lang_name:
+                continue
+            try:
+                lang_pct = float(lang.get("percent", 0) or 0)
+            except (ValueError, TypeError):
+                lang_pct = 0.0
+
+            levels: list[DimensionItem] = []
+            level_group = lang.get("level")
+            if isinstance(level_group, dict):
+                for lk, lvl in level_group.items():
+                    if isinstance(lvl, dict) and lvl.get("levelName"):
+                        try:
+                            lvl_pct = float(lvl.get("percent", 0) or 0)
+                            if lvl_pct > 0:
+                                levels.append(
+                                    DimensionItem(name=str(lvl["levelName"]).strip(), percent=lvl_pct)
+                                )
+                        except (ValueError, TypeError):
+                            continue
+            levels.sort(key=lambda x: x.percent, reverse=True)
+            languages.append(
+                LanguageItem(name=str(lang_name).strip(), percent=lang_pct, levels=levels)
+            )
+
+    all_percents = [
+        *(i["percent"] for i in edu_items),
+        *(i["percent"] for i in age_items),
+        *(i["percent"] for i in exp_items),
+    ]
+    dimension_groups = [
+        [i["percent"] for i in edu_items],
+        [i["percent"] for i in age_items],
+        [i["percent"] for i in exp_items],
+    ]
+
+    candidates = infer_applicant_count(
+        all_percents,
+        bounds=(range_info["min"], range_info["max"]),
+        dimension_groups=dimension_groups,
+    )
+
+    total_applicants: int | None = None
+    total_basis: Any = "unknown"
+    if candidates:
+        total_applicants = candidates[0]
+        total_basis = "inferred"
+    elif range_info["min"] > 0:
+        # Fallback to midpoint if no candidate matched exactly
+        total_applicants = range_info["min"]
+        total_basis = "unknown"
+
+    def _map_dimension(items: list[dict[str, Any]]) -> list[DimensionItem]:
+        res: list[DimensionItem] = []
+        for it in items:
+            count = (
+                round((it["percent"] * total_applicants) / 100.0)
+                if total_applicants is not None
+                else None
+            )
+            res.append(DimensionItem(name=it["name"], percent=it["percent"], count=count))
+        return res
+
+    for lang in languages:
+        if total_applicants is not None:
+            lang.count = round((lang.percent * total_applicants) / 100.0)
+            for lvl in lang.levels:
+                lvl.count = round((lvl.percent * total_applicants) / 100.0)
+
+    return ApplyAnalysisResult(
+        job_id=job_id,
+        job_no=job_no,
+        total_applicants=total_applicants,
+        total_basis=total_basis,
+        candidate_counts=candidates,
+        apply_range=range_info["label"],
+        update_time=str(update_time),
+        education=_map_dimension(edu_items),
+        age_distribution=_map_dimension(age_items),
+        experience_distribution=_map_dimension(exp_items),
+        languages=languages,
+        top_majors=_map_dimension(major_items)[:10],
+        top_skills=_map_dimension(skill_items)[:10],
+        certificates=_map_dimension(cert_items)[:10],
+    )
